@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF-редактор</title>
+<style>
+  :root {
+    --bg: #e8e9ed; --panel: #ffffff; --ink: #1c1e23; --muted: #6a6f7d; --line: #d8dae1;
+    --accent: #2d62ec; --accent-soft: rgba(45, 98, 236, .13); --warn: #b5530b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  header {
+    position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 650; margin-right: 6px; }
+  #name { color: var(--muted); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .spacer { flex: 1; }
+  button, .btn {
+    font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff;
+    color: var(--ink); cursor: pointer; white-space: nowrap;
+  }
+  button:hover:not(:disabled), .btn:hover { border-color: #b9bdc8; background: #f6f7f9; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: #2153d6; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  #zoomv { min-width: 46px; text-align: center; color: var(--muted); }
+
+  main { padding: 26px 16px 160px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
+  .page { position: relative; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.14), 0 8px 26px rgba(0,0,0,.07); }
+  .page img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+  .layer { position: absolute; inset: 0; }
+  .span { position: absolute; border-radius: 2px; }
+  .mode-text .span { cursor: text; }
+  .mode-text .span:hover { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .span.active { background: var(--accent-soft); outline: 2px solid var(--accent); }
+  .mode-move .span { cursor: move; }
+  .mode-move .span:hover { outline: 1px dashed var(--accent); }
+  .mode-move .span.sel, .span.sel { outline: 2px solid var(--accent); background: var(--accent-soft); }
+  .span.sel.anchor { outline-color: #e8590c; }
+  .guide { position: absolute; z-index: 7; pointer-events: none; background: #ff2e88; }
+  #align svg { width: 16px; height: 16px; display: block; fill: currentColor; stroke: currentColor; stroke-width: 1.5; }
+  #align rect { stroke: none; }
+  #align button { padding: 6px 9px; }
+  .warn { color: var(--warn); font-size: 12px; margin-bottom: 6px; }
+  .ghost { position: absolute; z-index: 6; pointer-events: none; background-repeat: no-repeat; mix-blend-mode: multiply; outline: 1px dashed var(--accent); }
+  .vacate { position: absolute; z-index: 5; pointer-events: none; }
+  .mode-add .page, .mode-erase .page { cursor: crosshair; }
+  .mode-add .span, .mode-erase .span { pointer-events: none; }
+  .pno { position: absolute; left: 0; right: 0; bottom: -21px; text-align: center; font-size: 12px; color: var(--muted); }
+  .selbox { position: absolute; border: 1.5px dashed var(--accent); background: var(--accent-soft); pointer-events: none; }
+  .busy { opacity: .55; transition: opacity .15s; }
+
+  .pop {
+    position: absolute; z-index: 40; width: 420px; max-width: calc(100vw - 32px); padding: 10px; background: #fff; border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 12px 34px rgba(0,0,0,.2); cursor: default;
+  }
+  .pop textarea {
+    width: 100%; min-height: 64px; resize: vertical; font-size: 16px; padding: 6px 8px;
+    border: 1px solid var(--line); border-radius: 6px; outline: none;
+  }
+  .pop textarea:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .row.end { justify-content: flex-end; }
+  .row select, .row input[type=number] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  .row input[type=number] { width: 62px; }
+  .row select[data-k=font] { max-width: 160px; }
+  .row input[type=color] { width: 34px; height: 30px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  .tog { display: inline-flex; align-items: center; gap: 3px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  .hint { color: var(--muted); font-size: 12px; margin-right: auto; }
+  .orig { color: var(--muted); font-size: 12px; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .link { border: 0; background: none; padding: 4px 6px; color: #c0392b; }
+  .link:hover:not(:disabled) { background: #fdf0ee; }
+
+  #drop {
+    margin: 9vh auto 0; max-width: 560px; padding: 54px 30px; text-align: center; background: #fff;
+    border: 2px dashed #c4c8d2; border-radius: 16px;
+  }
+  #drop h1 { font-size: 22px; margin: 0 0 8px; }
+  #drop p { color: var(--muted); margin: 6px 0; }
+  body.dragging #drop, body.dragging main { outline: 3px solid var(--accent); outline-offset: 6px; }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: min(640px, 92vw);
+    padding: 10px 16px; border-radius: 9px; background: #23262d; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 100;
+  }
+  #toast.show { opacity: 1; }
+  #toast.err { background: #9b2c1f; }
+</style>
+</head>
+<body class="mode-text">
+<header>
+  <span class="brand">PDF-редактор</span>
+  <label class="btn">Открыть PDF<input id="file" type="file" accept="application/pdf,.pdf" hidden></label>
+  <span id="name"></span>
+  <div class="seg" id="modes">
+    <button data-mode="text" class="on" title="Кликните по тексту, чтобы изменить его">Изменить текст</button>
+    <button data-mode="move" title="Перетаскивайте фрагменты текста мышью">Переместить</button>
+    <button data-mode="add" title="Кликните в нужное место страницы">Добавить текст</button>
+    <button data-mode="erase" title="Выделите область мышью">Закрасить область</button>
+  </div>
+  <div class="seg" id="align" hidden>
+    <button data-align="left" title="Выровнять по левому краю первого выделенного (оранжевая рамка)"><svg viewBox="0 0 16 16"><path d="M2 1v14"/><rect x="4" y="3" width="10" height="3"/><rect x="4" y="10" width="6" height="3"/></svg></button>
+    <button data-align="center" title="Выровнять по центру первого выделенного"><svg viewBox="0 0 16 16"><path d="M8 1v14"/><rect x="3" y="3" width="10" height="3"/><rect x="5" y="10" width="6" height="3"/></svg></button>
+    <button data-align="right" title="Выровнять по правому краю первого выделенного"><svg viewBox="0 0 16 16"><path d="M14 1v14"/><rect x="2" y="3" width="10" height="3"/><rect x="6" y="10" width="6" height="3"/></svg></button>
+    <button data-align="top" title="Выровнять по верху первого выделенного"><svg viewBox="0 0 16 16"><path d="M1 2h14"/><rect x="3" y="4" width="3" height="10"/><rect x="10" y="4" width="3" height="6"/></svg></button>
+    <button data-align="baseline" title="Поставить на одну строку с первым выделенным (по базовой линии)"><svg viewBox="0 0 16 16"><path d="M1 13h14"/><rect x="3" y="3" width="3" height="9"/><rect x="10" y="6" width="3" height="6"/></svg></button>
+  </div>
+  <div class="spacer"></div>
+  <button id="zout" title="Уменьшить">−</button><span id="zoomv"></span><button id="zin" title="Увеличить">+</button>
+  <button id="undo" title="Ctrl+Z">Отменить</button>
+  <button id="save" class="primary" title="Ctrl+S">Скачать PDF</button>
+</header>
+
+<div id="drop">
+  <h1>Перетащите PDF сюда</h1>
+  <p>или нажмите «Открыть PDF» вверху.</p>
+  <p>Кликните по любому фрагменту текста, исправьте его и нажмите «Применить».<br>Файл обрабатывается только на этом компьютере.</p>
+</div>
+<main id="pages"></main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S = { loaded: false, pages: [], fonts: [], undo: 0, dirty: false };
+let scale = 1.3, mode = 'text', revs = [], pop = null, scanWarned = false;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const j = await r.json();
+  if (j.error) { const e = new Error(j.error); e.code = r.status; throw e; }
+  return j;
+}
+const post = (path, data) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data || {}) });
+
+let toastTimer;
+function toast(msg, err = false, ms = 4500) {
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', ms);
+}
+const fail = e => toast(e.message, true, 7000);
+
+function syncButtons() {
+  $('#undo').disabled = !S.undo;
+  $('#save').disabled = !S.loaded;
+  $('#zoomv').textContent = Math.round(scale * 100 / 1.333) + '%';
+  $('#name').textContent = S.filename || '';
+  $('#name').title = S.filename || '';
+}
+
+// ---------- страницы ----------
+
+const pageEl = n => document.querySelector(`.page[data-n="${n}"]`);
+const observer = new IntersectionObserver(entries => entries.forEach(e => {
+  if (e.isIntersecting && !e.target.dataset.loaded) { e.target.dataset.loaded = 1; loadPage(+e.target.dataset.n); }
+}), { rootMargin: '900px' });
+
+function renderAll() {
+  closePop();
+  clearSel();
+  const main = $('#pages');
+  main.innerHTML = '';
+  $('#drop').hidden = S.loaded;
+  syncButtons();
+  if (!S.loaded) return;
+  if (revs.length !== S.pages.length) revs = S.pages.map(() => 0);
+  S.pages.forEach(([w, h], i) => {
+    const d = document.createElement('div');
+    d.className = 'page'; d.dataset.n = i;
+    d.style.width = w * scale + 'px'; d.style.height = h * scale + 'px';
+    d.innerHTML = `<img alt=""><div class="layer"></div><div class="pno">${i + 1} / ${S.pages.length}</div>`;
+    main.appendChild(d);
+    observer.observe(d);
+  });
+}
+
+async function loadPage(n) {
+  const d = pageEl(n);
+  if (!d) return;
+  const z = (scale * Math.min(window.devicePixelRatio || 1, 2.5)).toFixed(3);
+  const img = new Image();
+  img.src = `/api/page?n=${n}&z=${z}&r=${revs[n]}`;
+  const [spans] = await Promise.all([
+    api(`/api/spans?n=${n}`).then(j => j.spans),
+    img.decode().catch(() => {}),
+  ]);
+  d.querySelector('img').src = img.src;
+  d.classList.remove('busy');
+  const layer = d.querySelector('.layer');
+  layer.innerHTML = '';
+  for (const s of spans) {
+    const e = document.createElement('div');
+    e.className = 'span';
+    e._s = s;
+    place(e, s.box);
+    e.addEventListener('click', ev => { if (mode === 'text') { ev.stopPropagation(); openEdit(n, s, e); } });
+    layer.appendChild(e);
+  }
+  if (n === 0 && !spans.length && !scanWarned) {
+    scanWarned = true;
+    toast('На этой странице нет текстового слоя — похоже на скан. Используйте «Закрасить область» и «Добавить текст».', false, 9000);
+  }
+}
+
+function place(e, [x0, y0, x1, y1]) {
+  e.style.left = x0 * scale + 'px'; e.style.top = y0 * scale + 'px';
+  e.style.width = (x1 - x0) * scale + 'px'; e.style.height = (y1 - y0) * scale + 'px';
+}
+
+function refreshPage(n) {
+  if (n == null) return;
+  revs[n]++;
+  const d = pageEl(n);
+  if (d) { d.classList.add('busy'); loadPage(n).catch(fail); }
+}
+
+async function afterChange(r) {
+  S.undo = r.undo; S.dirty = r.dirty;
+  closePop();
+  syncButtons();
+  refreshPage(r.page);
+  if (r.note) toast(r.note);
+}
+
+// ---------- всплывающие панели ----------
+
+function closePop() {
+  if (pop) { pop.remove(); pop = null; }
+  document.querySelectorAll('.span.active').forEach(e => e.classList.remove('active'));
+  document.querySelectorAll('.selbox').forEach(e => e.remove());
+}
+
+function makePop(n, xPt, yPt, html) {
+  closePop();
+  const d = pageEl(n);
+  pop = document.createElement('div');
+  pop.className = 'pop';
+  pop.innerHTML = html;
+  pop.addEventListener('mousedown', e => e.stopPropagation());
+  pop.addEventListener('click', e => e.stopPropagation());
+  d.appendChild(pop);
+  const pw = d.clientWidth, w = pop.offsetWidth;
+  pop.style.left = Math.max(0, Math.min(xPt * scale, pw - w)) + 'px';
+  pop.style.top = yPt * scale + 'px';
+  pop.querySelector('[data-cancel]')?.addEventListener('click', closePop);
+  return pop;
+}
+
+const fontOptions = (sel, withAuto) =>
+  (withAuto ? `<option value="auto" selected>Как в документе</option>` : '') +
+  S.fonts.map(f => `<option${!withAuto && f === sel ? ' selected' : ''}>${esc(f)}</option>`).join('');
+
+const styleRow = (size, color, bold, italic, font, withAuto) => `
+  <div class="row">
+    <select data-k="font" title="Шрифт">${fontOptions(font, withAuto)}</select>
+    <input data-k="size" type="number" step="0.5" min="1" max="400" value="${+(+size).toFixed(2)}" title="Размер, pt">
+    <input data-k="color" type="color" value="${color}" title="Цвет">
+    <label class="tog" title="Жирный"><input data-k="bold" type="checkbox" ${bold ? 'checked' : ''}><b>Ж</b></label>
+    <label class="tog" title="Курсив"><input data-k="italic" type="checkbox" ${italic ? 'checked' : ''}><i>К</i></label>
+  </div>`;
+
+function readPop() {
+  const v = {};
+  pop.querySelectorAll('[data-k]').forEach(e => v[e.dataset.k] = e.type === 'checkbox' ? e.checked : e.value);
+  return v;
+}
+
+function wirePreview(family) {
+  const ta = pop.querySelector('textarea');
+  const upd = () => {
+    const v = readPop();
+    const fam = v.font && v.font !== 'auto' ? v.font : family;
+    ta.style.fontFamily = `"${fam}", sans-serif`;
+    ta.style.fontWeight = v.bold ? 700 : 400;
+    ta.style.fontStyle = v.italic ? 'italic' : 'normal';
+    ta.style.color = v.color;
+  };
+  pop.querySelectorAll('[data-k]').forEach(e => e.addEventListener('input', upd));
+  upd();
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); pop.querySelector('[data-ok]').click(); }
+  });
+  ta.focus();
+  ta.select();
+}
+
+async function run(btn, fn) {
+  btn.disabled = true;
+  try { await afterChange(await fn()); } catch (e) { fail(e); btn.disabled = false; }
+}
+
+function openEdit(n, s, el) {
+  makePop(n, s.box[0], s.box[3] + 6, `
+    <div class="orig" title="${esc(s.font)}">Было: ${esc(s.text)}</div>
+    ${s.text.includes('�') ? '<div class="warn">PDF не хранит, какие здесь буквы, поэтому текст ниже показан неверно. Сотрите его и впишите нужный целиком.</div>' : ''}
+    <textarea>${esc(s.text)}</textarea>
+    ${styleRow(s.size, s.color, s.bold, s.italic, s.family, true)}
+    <div class="row">
+      <select data-k="align" title="Выравнивание относительно исходного фрагмента">
+        <option value="left">По левому краю</option><option value="center">По центру</option><option value="right">По правому краю</option>
+      </select>
+      <label class="tog"><input data-k="fit" type="checkbox"> Вписать в ширину</label>
+    </div>
+    <div class="row end">
+      <button class="link" data-del title="Удалить этот фрагмент">Удалить</button>
+      <span class="hint">Ctrl+Enter</span>
+      <button data-cancel>Отмена</button><button class="primary" data-ok>Применить</button>
+    </div>`);
+  el.classList.add('active');
+  wirePreview(s.family);
+  const send = text => { const v = readPop(); return post('/api/edit', { page: n, span: s, text, ...v }); };
+  pop.querySelector('[data-ok]').onclick = e => {
+    const text = pop.querySelector('textarea').value;
+    const v = readPop();
+    if (text === s.text && v.font === 'auto' && +v.size === s.size && v.color === s.color && v.bold === s.bold && v.italic === s.italic) return closePop();
+    run(e.target, () => send(text));
+  };
+  pop.querySelector('[data-del]').onclick = e => run(e.target, () => send(''));
+}
+
+function openAdd(n, x, y) {
+  const last = JSON.parse(localStorage.getItem('addStyle') || 'null') || { size: 11, color: '#000000', bold: false, italic: false, font: S.fonts[0] };
+  makePop(n, x, y + 4, `
+    <textarea placeholder="Новый текст"></textarea>
+    ${styleRow(last.size, last.color, last.bold, last.italic, last.font, false)}
+    <div class="row end"><span class="hint">Ctrl+Enter</span><button data-cancel>Отмена</button><button class="primary" data-ok>Добавить</button></div>`);
+  const mark = document.createElement('div');
+  mark.className = 'selbox';
+  mark.style.cssText = `left:${x * scale}px;top:${y * scale}px;width:2px;height:${14 * scale}px`;
+  pageEl(n).appendChild(mark);
+  wirePreview(last.font);
+  pop.querySelector('[data-ok]').onclick = e => {
+    const v = readPop();
+    try { localStorage.setItem('addStyle', JSON.stringify(v)); } catch {}
+    run(e.target, () => post('/api/add', { page: n, x, y, text: pop.querySelector('textarea').value, ...v }));
+  };
+}
+
+// цвет фона вокруг выделения — чтобы заливка совпала с бумагой
+let pixCache = null;
+function sampleColor(n, [x0, y0, x1, y1]) {
+  try {
+    const img = pageEl(n).querySelector('img');
+    if (pixCache?.src !== img.src) {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, 0, 0);
+      pixCache = { src: img.src, c, g };
+    }
+    const { c, g } = pixCache;
+    const k = c.width / S.pages[n][0];
+    const pts = [], m = 2;
+    for (let i = 0; i <= 8; i++) {
+      const x = x0 + (x1 - x0) * i / 8, y = y0 + (y1 - y0) * i / 8;
+      pts.push([x, y0 - m], [x, y1 + m], [x0 - m, y], [x1 + m, y]);
+    }
+    const ch = [[], [], []];
+    for (const [x, y] of pts) {
+      const px = Math.round(x * k), py = Math.round(y * k);
+      if (px < 0 || py < 0 || px >= c.width || py >= c.height) continue;
+      const d = g.getImageData(px, py, 1, 1).data;
+      ch[0].push(d[0]); ch[1].push(d[1]); ch[2].push(d[2]);
+    }
+    if (!ch[0].length) return '#ffffff';
+    const med = a => a.sort((p, q) => p - q)[a.length >> 1];
+    return '#' + ch.map(a => med(a).toString(16).padStart(2, '0')).join('');
+  } catch { return '#ffffff'; }
+}
+
+function openErase(n, rect) {
+  makePop(n, rect[0], rect[3] + 6, `
+    <div class="row" style="margin-top:0">
+      <span>Цвет заливки</span><input data-k="color" type="color" value="${sampleColor(n, rect)}">
+      <span class="hint">подобран по фону</span>
+    </div>
+    <div class="row end"><button data-cancel>Отмена</button><button class="primary" data-ok>Закрасить</button></div>`);
+  pop.style.width = '300px';
+  pop.querySelector('[data-ok]').onclick = e => run(e.target, () => post('/api/erase', { page: n, rect, ...readPop() }));
+}
+
+// ---------- мышь по странице ----------
+
+let drag = null;
+const ptFromEvent = (d, e) => { const r = d.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; };
+const hits = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+
+function startBox(d) {
+  const box = document.createElement('div');
+  box.className = 'selbox';
+  d.appendChild(box);
+  return box;
+}
+
+$('#pages').addEventListener('mousedown', e => {
+  const d = e.target.closest('.page');
+  if (!d || e.button !== 0 || e.target.closest('.pop')) return;
+  const n = +d.dataset.n, start = ptFromEvent(d, e);
+  if (mode === 'erase') {
+    e.preventDefault();
+    closePop();
+    drag = { kind: 'erase', d, n, start, box: startBox(d), rect: null };
+  } else if (mode === 'move') {
+    e.preventDefault();
+    if (moving || nudge) return;
+    if (sel && sel.n !== n) clearSel();
+    const el = e.target.closest('.span');
+    if (el) {
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        toggleSel(n, el);
+        if (!el.classList.contains('sel')) return;
+      } else if (!el.classList.contains('sel')) {
+        clearSel();
+        toggleSel(n, el);
+      }
+      drag = { kind: 'move', d, n, start, dx: 0, dy: 0, started: false };
+    } else {
+      if (!e.shiftKey) clearSel();
+      drag = { kind: 'band', d, n, start, box: startBox(d), rect: null };
+    }
+  }
+});
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const [ax, ay] = drag.start, [bx, by] = ptFromEvent(drag.d, e);
+  if (drag.kind === 'move') {
+    let dx = bx - ax, dy = by - ay;
+    if (!drag.started) {
+      if (Math.hypot(dx, dy) * scale < 3) return; // защита от случайного сдвига при клике
+      drag.started = true;
+      showGhosts();
+      drag.snap = snapTargets();
+    }
+    // Shift — только по одной оси; lock — ось, которая заморожена
+    const lock = e.shiftKey ? (Math.abs(dx) > Math.abs(dy) ? 'y' : 'x') : '';
+    if (lock === 'y') dy = 0; else if (lock === 'x') dx = 0;
+    [dx, dy] = clampDelta(dx, dy);
+    if (e.altKey) clearGuides(); else [dx, dy] = snapDelta(drag, dx, dy, lock);
+    drag.dx = dx; drag.dy = dy;
+    moveGhosts(dx, dy);
+  } else {
+    drag.rect = [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)];
+    place(drag.box, drag.rect);
+  }
+});
+window.addEventListener('mouseup', () => {
+  if (!drag) return;
+  const g = drag;
+  drag = null;
+  if (g.kind === 'move') {
+    clearGuides();
+    if (g.started && (Math.abs(g.dx) >= 0.3 || Math.abs(g.dy) >= 0.3)) commitMove(g.dx, g.dy);
+    else clearGhosts();
+    return;
+  }
+  const r = g.rect, small = !r || r[2] - r[0] < 2 || r[3] - r[1] < 2;
+  if (g.kind === 'band') {
+    g.box.remove();
+    if (!small) pageEl(g.n).querySelectorAll('.span').forEach(el => {
+      if (hits(el._s.box, r) && !el.classList.contains('sel')) toggleSel(g.n, el);
+    });
+    return;
+  }
+  if (small) { g.box.remove(); return; }
+  openErase(g.n, r);
+  pageEl(g.n).appendChild(g.box);
+});
+
+// ---------- перемещение ----------
+
+let sel = null, nudge = null, nudgeTimer = null, moving = false;
+
+function toggleSel(n, el) {
+  if (!sel) sel = { n, els: [] };
+  const i = sel.els.indexOf(el);
+  if (i >= 0) { sel.els.splice(i, 1); el.classList.remove('sel'); }
+  else { sel.els.push(el); el.classList.add('sel'); }
+  if (!sel.els.length) sel = null;
+  markSel();
+}
+
+function clearSel() {
+  clearTimeout(nudgeTimer);
+  nudge = null;
+  clearGhosts();
+  document.querySelectorAll('.span.sel').forEach(e => e.classList.remove('sel'));
+  sel = null;
+  markSel();
+}
+
+// первый выделенный — опорный для выравнивания, у него оранжевая рамка
+function markSel() {
+  document.querySelectorAll('.span.anchor').forEach(e => e.classList.remove('anchor'));
+  const many = sel && sel.els.length > 1;
+  if (many) sel.els[0].classList.add('anchor');
+  document.querySelectorAll('#align button').forEach(b => b.disabled = !many || moving);
+}
+
+// пока тянем — показываем кусок картинки страницы, а исходное место прикрываем цветом фона
+function showGhosts() {
+  clearGhosts();
+  const d = pageEl(sel.n), src = d.querySelector('img').src;
+  const [W, H] = S.pages[sel.n];
+  for (const el of sel.els) {
+    const b = el._s.box;
+    const v = document.createElement('div');
+    v.className = 'vacate';
+    place(v, b);
+    v.style.background = sampleColor(sel.n, b);
+    const g = document.createElement('div');
+    g.className = 'ghost';
+    place(g, b);
+    g.style.backgroundImage = `url("${src}")`;
+    g.style.backgroundSize = `${W * scale}px ${H * scale}px`;
+    g.style.backgroundPosition = `${-b[0] * scale}px ${-b[1] * scale}px`;
+    d.append(v, g);
+  }
+}
+const moveGhosts = (dx, dy) => document.querySelectorAll('.ghost').forEach(g => g.style.transform = `translate(${dx * scale}px, ${dy * scale}px)`);
+const clearGhosts = () => document.querySelectorAll('.ghost, .vacate, .guide').forEach(e => e.remove());
+const clearGuides = () => document.querySelectorAll('.guide').forEach(e => e.remove());
+
+// ---------- направляющие: прилипание к краям и строкам других фрагментов ----------
+
+const SNAP_PX = 6;
+
+function snapTargets() {
+  const xs = [], ys = [];
+  pageEl(sel.n).querySelectorAll('.span').forEach(el => {
+    if (sel.els.includes(el)) return;
+    const b = el._s.box;
+    xs.push({ k: 'l', v: b[0], b }, { k: 'c', v: (b[0] + b[2]) / 2, b }, { k: 'r', v: b[2], b });
+    ys.push({ k: 't', v: b[1], b }, { k: 'base', v: el._s.base[1], b });
+  });
+  const bs = sel.els.map(el => el._s.box);
+  const box = [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])),
+               Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))];
+  const own = { l: box[0], c: (box[0] + box[2]) / 2, r: box[2], t: box[1], base: sel.els[0]._s.base[1] };
+  return { xs, ys, own, box };
+}
+
+function snapAxis(cands, own, d) {
+  let best = null;
+  for (const t of cands) {
+    const diff = t.v - (own[t.k] + d);
+    if (Math.abs(diff) * scale <= SNAP_PX && (!best || Math.abs(diff) < Math.abs(best.diff))) best = { ...t, diff };
+  }
+  return best;
+}
+
+function snapDelta(g, dx, dy, lock) {
+  const s = g.snap;
+  clearGuides();
+  const bx = lock === 'x' ? null : snapAxis(s.xs, s.own, dx);
+  const by = lock === 'y' ? null : snapAxis(s.ys, s.own, dy);
+  if (bx) dx += bx.diff;
+  if (by) dy += by.diff;
+  const sb = [s.box[0] + dx, s.box[1] + dy, s.box[2] + dx, s.box[3] + dy];
+  // линия тянется через все фрагменты, стоящие на этой же линии
+  if (bx) {
+    const same = s.xs.filter(t => t.k === bx.k && Math.abs(t.v - bx.v) < 0.5);
+    addGuide(g.n, bx.v, Math.min(sb[1], ...same.map(t => t.b[1])) - 4, bx.v, Math.max(sb[3], ...same.map(t => t.b[3])) + 4);
+  }
+  if (by) {
+    const same = s.ys.filter(t => t.k === by.k && Math.abs(t.v - by.v) < 0.5);
+    addGuide(g.n, Math.min(sb[0], ...same.map(t => t.b[0])) - 4, by.v, Math.max(sb[2], ...same.map(t => t.b[2])) + 4, by.v);
+  }
+  return [dx, dy];
+}
+
+function addGuide(n, x0, y0, x1, y1) {
+  const e = document.createElement('div');
+  e.className = 'guide';
+  e.style.left = x0 * scale + 'px';
+  e.style.top = y0 * scale + 'px';
+  e.style.width = Math.max(1, (x1 - x0) * scale) + 'px';
+  e.style.height = Math.max(1, (y1 - y0) * scale) + 'px';
+  pageEl(n).appendChild(e);
+}
+
+// не даём утащить фрагменты за край страницы
+function clampDelta(dx, dy) {
+  const [W, H] = S.pages[sel.n], bs = sel.els.map(el => el._s.box);
+  const x0 = Math.min(...bs.map(b => b[0])), y0 = Math.min(...bs.map(b => b[1]));
+  const x1 = Math.max(...bs.map(b => b[2])), y1 = Math.max(...bs.map(b => b[3]));
+  return [Math.max(-x0, Math.min(W - x1, dx)), Math.max(-y0, Math.min(H - y1, dy))];
+}
+
+const shiftBox = (b, dx, dy) => [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy];
+
+// items: [{spans, dx, dy}] — у каждой группы свой сдвиг; keep — что не двигается, но остаётся выделенным
+async function commitItems(n, items, keep = []) {
+  const expect = [...keep.map(s => ({ text: s.text, box: s.box })),
+                  ...items.flatMap(it => it.spans.map(s => ({ text: s.text, box: shiftBox(s.box, it.dx, it.dy) })))];
+  moving = true;
+  markSel();
+  try {
+    const r = await post('/api/move', { page: n, items });
+    S.undo = r.undo; S.dirty = r.dirty;
+    syncButtons();
+    revs[n]++;
+    await loadPage(n);
+    clearSel();
+    // оставляем перенесённое выделенным в прежнем порядке — чтобы можно было сразу подвинуть ещё
+    const els = [...pageEl(n).querySelectorAll('.span')];
+    for (const x of expect) {
+      const el = els.find(el => !el.classList.contains('sel') && el._s.text === x.text &&
+                                x.box.every((v, i) => Math.abs(v - el._s.box[i]) < 1.5));
+      if (el) toggleSel(n, el);
+    }
+  } catch (e) { fail(e); clearGhosts(); }
+  moving = false;
+  markSel();
+}
+
+function commitMove(dx, dy) {
+  if (sel) return commitItems(sel.n, [{ spans: sel.els.map(el => el._s), dx, dy }]);
+}
+
+$('#align').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b || !sel || sel.els.length < 2 || moving || nudge) return;
+  const [A, ...rest] = sel.els.map(el => el._s), a = A.box, how = b.dataset.align;
+  const keep = [A], items = [];
+  for (const s of rest) {
+    const o = s.box;
+    const dx = { left: a[0] - o[0], center: (a[0] + a[2] - o[0] - o[2]) / 2, right: a[2] - o[2] }[how] ?? 0;
+    const dy = { top: a[1] - o[1], baseline: A.base[1] - s.base[1] }[how] ?? 0;
+    if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) items.push({ spans: [s], dx, dy });
+    else keep.push(s);
+  }
+  if (!items.length) return toast('Уже выровнено');
+  commitItems(sel.n, items, keep);
+});
+
+function nudgeBy(dx, dy) {
+  if (!sel || moving) return;
+  if (!nudge) { nudge = { dx: 0, dy: 0 }; showGhosts(); }
+  [nudge.dx, nudge.dy] = clampDelta(nudge.dx + dx, nudge.dy + dy);
+  moveGhosts(nudge.dx, nudge.dy);
+  clearTimeout(nudgeTimer);
+  nudgeTimer = setTimeout(() => {
+    const v = nudge;
+    nudge = null;
+    if (v.dx || v.dy) commitMove(v.dx, v.dy); else clearGhosts();
+  }, 600);
+}
+
+async function deleteSel() {
+  if (!sel || moving || nudge) return;
+  const { n } = sel, spans = sel.els.map(el => el._s);
+  clearSel();
+  try { await afterChange(await post('/api/delete', { page: n, spans })); } catch (e) { fail(e); }
+}
+$('#pages').addEventListener('click', e => {
+  const d = e.target.closest('.page');
+  if (!d || e.target.closest('.pop')) return;
+  if (mode === 'add') { const [x, y] = ptFromEvent(d, e); openAdd(+d.dataset.n, x, y); }
+  else if (mode === 'text') closePop();
+});
+
+// ---------- панель ----------
+
+$('#modes').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  mode = b.dataset.mode;
+  document.body.className = 'mode-' + mode;
+  document.querySelectorAll('#modes button').forEach(x => x.classList.toggle('on', x === b));
+  closePop();
+  clearSel();
+  $('#align').hidden = mode !== 'move';
+  if (mode === 'move' && !moveHinted) {
+    moveHinted = true;
+    toast('Тяните фрагмент мышью — он прилипает к краям и строкам других фрагментов (розовая линия; Alt — без прилипания). ' +
+      'Рамкой или Shift+кликом — выделить несколько; кнопки выравнивания на панели ровняют их по первому выделенному (оранжевая рамка). ' +
+      'Shift при перетаскивании — строго по горизонтали/вертикали, стрелки — сдвиг на 1 pt (с Shift — на 10), Delete — удалить.', false, 15000);
+  }
+});
+let moveHinted = false;
+
+async function openFile(file, password) {
+  if (!file) return;
+  if (S.dirty && !confirm('Есть несохранённые изменения. Открыть другой файл?')) return;
+  try {
+    const headers = { 'X-Filename': encodeURIComponent(file.name) };
+    if (password) headers['X-Password'] = encodeURIComponent(password);
+    S = await api('/api/open', { method: 'POST', headers, body: file });
+    revs = []; scanWarned = false;
+    fitWidth();
+    renderAll();
+    window.scrollTo(0, 0);
+  } catch (e) {
+    if (e.code === 401) {
+      const p = prompt(password ? 'Неверный пароль. Попробуйте ещё раз:' : 'PDF защищён паролем. Введите пароль:');
+      if (p) return openFile(file, p);
+    } else fail(e);
+  }
+}
+
+let userZoomed = false;
+function fitWidth() {
+  userZoomed = false;
+  const maxW = Math.max(...S.pages.map(p => p[0]), 1);
+  scale = Math.max(0.5, Math.min(1.8, (window.innerWidth - 60) / maxW));
+}
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (!S.loaded || userZoomed || pop) return;
+    const old = scale;
+    fitWidth();
+    if (Math.abs(old - scale) > 0.01) renderAll();
+  }, 250);
+});
+
+function setZoom(k) {
+  userZoomed = true;
+  const ratio = window.scrollY / Math.max(1, document.body.scrollHeight);
+  scale = Math.max(0.4, Math.min(4, scale * k));
+  renderAll();
+  window.scrollTo(0, ratio * document.body.scrollHeight);
+}
+
+async function undo() {
+  if (moving) return;
+  clearSel();
+  try {
+    const r = await post('/api/undo');
+    S.undo = r.undo; S.dirty = r.dirty;
+    closePop(); syncButtons(); refreshPage(r.page);
+  } catch (e) { fail(e); }
+}
+
+function save() {
+  if (!S.loaded) return;
+  closePop();
+  location.href = '/api/save';
+  S.dirty = false;
+}
+
+$('#file').addEventListener('change', e => { openFile(e.target.files[0]); e.target.value = ''; });
+$('#zin').onclick = () => setZoom(1.2);
+$('#zout').onclick = () => setZoom(1 / 1.2);
+$('#undo').onclick = undo;
+$('#save').onclick = save;
+
+window.addEventListener('keydown', e => {
+  const typing = /^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement?.tagName);
+  if (e.key === 'Escape') { closePop(); clearSel(); }
+  else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') { e.preventDefault(); save(); }
+  else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !typing) { e.preventDefault(); undo(); }
+  else if (mode === 'move' && sel && !typing) {
+    const step = e.shiftKey ? 10 : 1;
+    const dir = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (dir) { e.preventDefault(); nudgeBy(...dir); }
+    else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); }
+  }
+});
+window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+let dragDepth = 0;
+window.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+  const f = [...e.dataTransfer.files].find(f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  if (f) openFile(f); else toast('Это не PDF-файл', true);
+});
+
+api('/api/state').then(st => {
+  S = st;
+  if (S.loaded) fitWidth();
+  renderAll();
+}).catch(fail);
+</script>
+</body>
+</html>
